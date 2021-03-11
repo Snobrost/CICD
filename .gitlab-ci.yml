@@ -1,0 +1,79 @@
+image: maven:latest
+
+stages:
+- build
+- test
+- release
+
+variables:
+  MAVEN_CLI_OPTS: " --batch-mode" 
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+  TEST_IMAGE: gitlab.example.com:5555/sammy/hello_hapi:$CI_COMMIT_REF_NAME
+  RELEASE_IMAGE: gitlab.example.com:5555/sammy/hello_hapi:latest
+
+before_script:
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN gitlab.example.com:5555
+
+stage:
+    -build
+    -test
+    -dockerbuild
+    
+cache:
+  paths:
+    - .m2/repository/
+
+build_js:
+  image: node:latest
+  stage: build
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+    - .npm/
+  script:
+    - cd js
+    - npm install
+    - npm run build
+
+build_java:
+  stage: build 
+  script:
+    - mvn $MAVEN_CLI_OPTS compile
+  artifacts:
+    paths: 
+      - target/
+
+build_docker:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: dockerbuild
+  script:
+    - docker build --pull -t $TEST_IMAGE .
+    - docker push $TEST_IMAGE
+
+
+test:
+  stage: test
+  script:
+    - mvn $MAVEN_CLI_OPTS test
+  artifacts:
+    paths: 
+      - target/
+
+test_docker:
+  stage: test
+  script:
+    - docker pull $TEST_IMAGE
+    - docker run $TEST_IMAGE npm test
+
+
+release_docker:
+  image: docker:latest
+  stage: release
+  script:
+    - docker pull $TEST_IMAGE
+    - docker tag $TEST_IMAGE $RELEASE_IMAGE
+    - docker push $RELEASE_IMAGE
+  only:
+    - master
